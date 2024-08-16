@@ -1,0 +1,10 @@
+syntax = "proto3";
+package protobuf;
+
+//具体的生成路径
+option go_package = "./protobuf";
+message Example {
+  string name = 1;
+  int32 age = 2;
+  string email = 3;
+}
