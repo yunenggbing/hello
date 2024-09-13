@@ -42,15 +42,13 @@ func main() {
 	//fmt.Println("key:" + key)
 	//fmt.Println(string(file))
 	logger := log.NewLogger(log.DEBUG, "exeLog.log")
-	if err != nil {
-		fmt.Printf("创建 Logger 时出错: %v\n", err)
-	}
 	logger.Info("创建 Logger 成功")
 	var values []string
 	// 读取Config.ini配置文件内容
 	scanner := bufio.NewScanner(fileContent)
 	inSection := false
 	for scanner.Scan() {
+		// 读取文件中的每一行内容
 		line := scanner.Text()
 		//判断是否在[ ]块内部
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
