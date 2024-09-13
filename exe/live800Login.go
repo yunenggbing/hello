@@ -84,7 +84,7 @@ func main() {
 	selectOption := values[choice-1]
 	logger.Info("你选择了：%s", selectOption)
 	fmt.Println("你选择了:", selectOption)
-	// 读取 INI 配置文件
+	// 通过ini库读取 INI 配置文件
 	cfg, err := ini.Load(filePath)
 	if err != nil {
 		logger.Fatal("Fail to read file: %v", err)
