@@ -77,17 +77,28 @@ func main() {
 	logger.Info("你选择了：%s", selectOption)
 	fmt.Println("你选择了:", selectOption)
 	// 通过ini库读取 INI 配置文件
-	cfg, err := ini.Load(filePath)
+	//cfg, err := ini.Load(filePath)
+	//if err != nil {
+	//	logger.Fatal("Fail to read file: %v", err)
+	//}
+	////使用用户输入的选项进行设置ini文件
+	//section := cfg.Section("Server")
+	//section.Key("Live800Urls.0").SetValue(selectOption)
+
+	//err1 := cfg.SaveTo(filePath)
+	//if err1 != nil {
+	//	logger.Fatal("Fail to save file: %v", err1)
+	//	return
+	//}
+	file, err := os.OpenFile(filePath, os.O_RDWR, 0644)
 	if err != nil {
-		logger.Fatal("Fail to read file: %v", err)
+		logger.Error("Fail to open file: %v", err)
+
 	}
+	defer file.Close()
 	//使用用户输入的选项进行设置ini文件
-	cfg.Section("Server").Key("Live800Urls.0").SetValue(selectOption)
-	err1 := cfg.SaveTo(filePath)
-	if err1 != nil {
-		logger.Fatal("Fail to save file: %v", err1)
-		return
-	}
+	ResetConfigBySelectUrl(file, selectOption)
+
 	newCfg, err2 := ini.Load(filePath)
 	if err2 != nil {
 		logger.Fatal("Fail to reload file:%v", err2)
@@ -107,7 +118,7 @@ func main() {
 
 func initOptionJSon(dir string, err error, logger *log.Logger, values []string, ops Options, jsonFileName string) (*bufio.Scanner, bool, []string) {
 	filePath := dir + "\\Config\\Config.ini"
-	fileContent, err := os.Open(filePath)
+	fileContent, err := os.OpenFile(filePath, os.O_RDWR, 0644)
 	if err != nil {
 		fmt.Println("打开文件失败:", err)
 		return nil, true, values
@@ -144,12 +155,14 @@ func readIniData(fileContent *os.File, values []string) (*bufio.Scanner, []strin
 	// 读取Config.ini配置文件内容
 	scanner := bufio.NewScanner(fileContent)
 	inSection := false
+	var lines []string
 	for scanner.Scan() {
 		// 读取文件中的每一行内容
 		line := scanner.Text()
 		//判断是否在[ ]块内部
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			inSection = true
+			lines = append(lines, line)
 			continue
 		}
 		newLine := strings.ReplaceAll(line, " ", "")
@@ -157,9 +170,40 @@ func readIniData(fileContent *os.File, values []string) (*bufio.Scanner, []strin
 		if inSection && (strings.HasPrefix(newLine, "Live800Urls.0") || strings.HasPrefix(newLine, "#Live800Urls.0")) {
 			//strings.SplitN 函数将字符串按照指定的分隔符进行分割，返回一个字符串切片
 			values = append(values, strings.SplitN(newLine, "=", 2)[1])
+			//如果不存在#注释，则记上注释
+			if !strings.HasPrefix(newLine, "#") {
+				newLine = "#Live800Urls.0=" + newLine
+			}
+			lines = append(lines, newLine)
+		} else {
+			lines = append(lines, line)
 		}
 	}
+	reSaveFile(fileContent, lines)
 	return scanner, values
+}
+
+func reSaveFile(fileContent *os.File, lines []string) {
+	if err := fileContent.Truncate(0); err != nil {
+		fmt.Println("文件截断失败：", err)
+	}
+	//将文件指针移动到文件开头
+	if _, err := fileContent.Seek(0, 0); err != nil {
+		fmt.Println("文件指针移动失败：", err)
+	}
+	//将切片中的内容写入文件
+	writer := bufio.NewWriter(fileContent)
+	for line := range lines {
+		_, err := writer.WriteString(lines[line] + "\n")
+		if err != nil {
+			fmt.Println(fmt.Println("写入文件失败：", err))
+			continue
+		}
+	}
+	//查看缓存中的内容是否完全写入文件中
+	if err := writer.Flush(); err != nil {
+		fmt.Println("写入文件失败：", err)
+	}
 }
 
 type Option struct {
@@ -196,4 +240,19 @@ func Load(filePath string) (Options, error) {
 func (ops *Options) Add(url string) {
 	newOp := Option{Value: url}
 	ops.Options = append(ops.Options, newOp)
+}
+
+// ResetConfigBySelectUrl 根据所选择的选项打开config中对应的url配置
+func ResetConfigBySelectUrl(file *os.File, selectUrl string) {
+	scanner := bufio.NewScanner(file)
+	var lines []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, selectUrl) {
+			line = strings.ReplaceAll(line, "#", "")
+		}
+		lines = append(lines, line)
+	}
+	reSaveFile(file, lines)
+
 }
