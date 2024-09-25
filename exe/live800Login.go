@@ -27,6 +27,27 @@ func main() {
 		fmt.Println("获取当前目录失败:", err)
 		return
 	}
+	filePath := dir + "\\Config\\Config.ini"
+	//是否需要新加配置
+	fmt.Println("请问是否需要新加url配置: 是：Y,否：N")
+	var add string
+	//等待用户进行输入
+	_, err = fmt.Scanln(&add)
+	if err != nil {
+		fmt.Println("输入错误:", err)
+		return
+	}
+	if add == "Y" {
+		//让用户输入新的url地址
+		fmt.Println("请输入新的url地址：")
+		var newUrl string
+		_, err = fmt.Scanln(&newUrl)
+		if err != nil {
+			fmt.Println("新的url地址输入错误:", err)
+			return
+		}
+		SetNewUrl(newUrl, dir)
+	}
 	//json文件路径
 	jsonFileName := dir + "\\" + fileName
 	fmt.Println("json文件路径:", jsonFileName)
@@ -37,12 +58,14 @@ func main() {
 	}
 	var values []string
 	logger := log.NewLogger(log.DEBUG, "exeLog.log")
-	filePath := dir + "\\Config\\Config.ini"
 	var scanner *bufio.Scanner
 	done := false
 	if len(ops.Options) == 0 {
 		fmt.Println("没有可用的登录地址,重新生成")
-		scanner, done, values = initOptionJSon(dir, err, logger, values, ops, jsonFileName)
+		scanner, done, values, err = initOptionJSon(dir, err, logger, values, ops, jsonFileName)
+		if err != nil {
+			logger.Error("initOptionJSon error:", err)
+		}
 		if done {
 			return
 		}
@@ -90,6 +113,7 @@ func main() {
 	//	logger.Fatal("Fail to save file: %v", err1)
 	//	return
 	//}
+	//O_RDWR 必须使用该模式打开，不然无法操作
 	file, err := os.OpenFile(filePath, os.O_RDWR, 0644)
 	if err != nil {
 		logger.Error("Fail to open file: %v", err)
@@ -97,7 +121,7 @@ func main() {
 	}
 	defer file.Close()
 	//使用用户输入的选项进行设置ini文件
-	ResetConfigBySelectUrl(file, selectOption)
+	SetConfigBySelectUrl(file, selectOption, false)
 
 	newCfg, err2 := ini.Load(filePath)
 	if err2 != nil {
@@ -116,12 +140,19 @@ func main() {
 	logger.Info("exe启动成功")
 }
 
-func initOptionJSon(dir string, err error, logger *log.Logger, values []string, ops Options, jsonFileName string) (*bufio.Scanner, bool, []string) {
+func initOptionJSon(dir string, err error, logger *log.Logger, values []string, ops Options, jsonFileName string) (*bufio.Scanner, bool, []string, error) {
 	filePath := dir + "\\Config\\Config.ini"
 	fileContent, err := os.OpenFile(filePath, os.O_RDWR, 0644)
 	if err != nil {
-		fmt.Println("打开文件失败:", err)
-		return nil, true, values
+		// 如果文件不存在则查看下另一个路径下的文件
+		if os.IsNotExist(err) {
+			filePath = dir + "\\Config.ini"
+			fileContent, err = os.OpenFile(filePath, os.O_RDWR, 0644)
+		}
+		if err != nil {
+			fmt.Println("打开文件失败:", err)
+			return nil, true, values, err
+		}
 	}
 	defer fileContent.Close()
 
@@ -148,7 +179,7 @@ func initOptionJSon(dir string, err error, logger *log.Logger, values []string, 
 			continue
 		}
 	}
-	return scanner, false, values
+	return scanner, false, values, nil
 }
 
 func readIniData(fileContent *os.File, values []string) (*bufio.Scanner, []string) {
@@ -172,18 +203,18 @@ func readIniData(fileContent *os.File, values []string) (*bufio.Scanner, []strin
 			values = append(values, strings.SplitN(newLine, "=", 2)[1])
 			//如果不存在#注释，则记上注释
 			if !strings.HasPrefix(newLine, "#") {
-				newLine = "#Live800Urls.0=" + newLine
+				newLine = "#" + newLine
 			}
 			lines = append(lines, newLine)
 		} else {
 			lines = append(lines, line)
 		}
 	}
-	reSaveFile(fileContent, lines)
+	ReSaveFile(fileContent, lines)
 	return scanner, values
 }
 
-func reSaveFile(fileContent *os.File, lines []string) {
+func ReSaveFile(fileContent *os.File, lines []string) {
 	if err := fileContent.Truncate(0); err != nil {
 		fmt.Println("文件截断失败：", err)
 	}
@@ -242,17 +273,47 @@ func (ops *Options) Add(url string) {
 	ops.Options = append(ops.Options, newOp)
 }
 
-// ResetConfigBySelectUrl 根据所选择的选项打开config中对应的url配置
-func ResetConfigBySelectUrl(file *os.File, selectUrl string) {
+// SetConfigBySelectUrl 根据所选择的选项打开config中对应的url配置
+func SetConfigBySelectUrl(file *os.File, selectUrl string, isAddUrl bool) {
 	scanner := bufio.NewScanner(file)
 	var lines []string
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.Contains(line, selectUrl) {
-			line = strings.ReplaceAll(line, "#", "")
+		if isAddUrl {
+			// 添加新url,位于CurLive800UrlIndex 之前，正常配制文件中该位置在Live800Urls.0之后
+			if strings.Contains(line, "CurLive800UrlIndex") {
+				lines = append(lines, "#Live800Urls.0="+selectUrl)
+				//lines = append(lines, line)
+			}
+		} else {
+			if strings.Contains(line, selectUrl) {
+				line = strings.ReplaceAll(line, "#", "")
+			}
 		}
+
 		lines = append(lines, line)
 	}
-	reSaveFile(file, lines)
+	ReSaveFile(file, lines)
+}
 
+// SetNewUrl 添加一个新的url
+func SetNewUrl(newUrl string, dirPath string) {
+	filePath := dirPath + "\\Config\\Config.ini"
+	fileContent, err := os.OpenFile(filePath, os.O_RDWR, 0644)
+	if err != nil {
+		// 如果文件不存在则查看下另一个路径下的文件
+		if os.IsNotExist(err) {
+			filePath = dirPath + "\\Config.ini"
+			fileContent, err = os.OpenFile(filePath, os.O_RDWR, 0644)
+		}
+		if err != nil {
+			fmt.Println("打开文件失败:", err)
+		}
+	}
+	defer fileContent.Close()
+	SetConfigBySelectUrl(fileContent, newUrl, true)
+	//清空json文件
+	jsonFileName := dirPath + "\\" + fileName
+	//删除上面的文件
+	os.Remove(jsonFileName)
 }
